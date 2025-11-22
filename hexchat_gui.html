@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ollama Oracle Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --bg-primary: #0a0a0a;
+            --bg-secondary: #1a1a1a;
+            --bg-tertiary: #2a2a2a;
+            --border: #333;
+            --text-primary: #e0e0e0;
+            --text-dim: #888;
+            --text-user: #87ceeb;
+            --text-model: #98fb98;
+            --text-system: #b19cd9;
+            --text-error: #ff6b6b;
+            --text-warning: #ffa500;
+        }
+        
+        body {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #initialization {
+            padding: 20px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+        }
+        
+        #model-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        #model-input {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid #444;
+            padding: 8px 12px;
+            border-radius: 3px;
+            font-family: inherit;
+            font-size: 14px;
+            flex: 1;
+            max-width: 300px;
+        }
+        
+        button {
+            background: #3a3a3a;
+            color: var(--text-primary);
+            border: 1px solid #555;
+            padding: 8px 16px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        
+        button:hover:not(:disabled) {
+            background: #4a4a4a;
+            border-color: #666;
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        #status-log {
+            font-size: 13px;
+            line-height: 1.6;
+            color: var(--text-dim);
+            max-height: 150px;
+            overflow-y: auto;
+            padding: 10px;
+            background: var(--bg-primary);
+            border-radius: 3px;
+            margin-top: 10px;
+        }
+        
+        .status-entry {
+            margin: 2px 0;
+            font-family: inherit;
+        }
+        
+        .status-system { color: var(--text-system); }
+        .status-success { color: var(--text-model); }
+        .status-error { color: var(--text-error); }
+        .status-warning { color: var(--text-warning); }
+        .status-info { color: var(--text-primary); }
+        
+        #chat-interface {
+            flex: 1;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        #chat-interface.active {
+            display: flex;
+        }
+        
+        #chat-header {
+            padding: 10px 20px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        #model-name {
+            font-weight: bold;
+            color: var(--text-model);
+        }
+        
+        #output {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #0f0f0f;
+        }
+        
+        .message {
+            margin: 15px 0;
+            line-height: 1.6;
+            animation: fadeIn 0.3s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .message-header {
+            font-size: 12px;
+            opacity: 0.7;
+            margin-bottom: 5px;
+        }
+        
+        .message-content {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .user { color: var(--text-user); }
+        .assistant { color: var(--text-model); }
+        .system { color: var(--text-system); }
+        .error { color: var(--text-error); }
+        
+        #input-container {
+            display: flex;
+            padding: 15px 20px;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+            gap: 10px;
+        }
+        
+        #input {
+            flex: 1;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid #444;
+            padding: 10px;
+            border-radius: 3px;
+            resize: none;
+            font-family: inherit;
+            font-size: 14px;
+            min-height: 50px;
+        }
+        
+        #confirmation-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        #confirmation-modal.active {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: var(--bg-secondary);
+            padding: 30px;
+            border-radius: 5px;
+            border: 1px solid var(--border);
+            max-width: 400px;
+            text-align: center;
+        }
+        
+        .modal-buttons {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        
+        .loading-dots::after {
+            content: '';
+            animation: dots 1.5s infinite;
+        }
+        
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+    </style>
+</head>
+<body>
+    <div id="initialization">
+        <div id="model-controls">
+            <label for="model-input">Model:</label>
+            <input type="text" id="model-input" placeholder="Enter model name (e.g., llama3.2, mistral, phi)" autofocus>
+            <button id="check-model">Initialize Model</button>
+        </div>
+        <div id="status-log"></div>
+    </div>
+    
+    <div id="chat-interface">
+        <div id="chat-header">
+            <div>Connected to: <span id="model-name"></span></div>
+            <button id="reset-model">Change Model</button>
+        </div>
+        <div id="output"></div>
+        <div id="input-container">
+            <textarea id="input" rows="2" placeholder="Enter your message... (Enter to send, Shift+Enter for new line)"></textarea>
+            <button id="send">Send</button>
+        </div>
+    </div>
+    
+    <div id="confirmation-modal">
+        <div class="modal-content">
+            <p id="modal-message"></p>
+            <div class="modal-buttons">
+                <button id="modal-yes">Yes</button>
+                <button id="modal-no">No</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State management
+        let currentModel = null;
+        let isProcessing = false;
+        
+        // DOM elements
+        const modelInput = document.getElementById('model-input');
+        const checkModelBtn = document.getElementById('check-model');
+        const statusLog = document.getElementById('status-log');
+        const chatInterface = document.getElementById('chat-interface');
+        const initialization = document.getElementById('initialization');
+        const output = document.getElementById('output');
+        const input = document.getElementById('input');
+        const sendBtn = document.getElementById('send');
+        const modelName = document.getElementById('model-name');
+        const resetModelBtn = document.getElementById('reset-model');
+        const modal = document.getElementById('confirmation-modal');
+        const modalMessage = document.getElementById('modal-message');
+        const modalYes = document.getElementById('modal-yes');
+        const modalNo = document.getElementById('modal-no');
+        
+        // Utility functions
+        function addStatus(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `status-entry status-${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            statusLog.appendChild(entry);
+            statusLog.scrollTop = statusLog.scrollHeight;
+        }
+        
+        function addMessage(sender, content, type = 'user') {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            
+            const header = document.createElement('div');
+            header.className = 'message-header';
+            header.textContent = `[${sender}]`;
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            contentDiv.textContent = content;
+            
+            messageDiv.appendChild(header);
+            messageDiv.appendChild(contentDiv);
+            output.appendChild(messageDiv);
+            output.scrollTop = output.scrollHeight;
+            
+            return contentDiv;
+        }
+        
+        function showModal(message) {
+            return new Promise((resolve) => {
+                modalMessage.textContent = message;
+                modal.classList.add('active');
+                
+                const handleYes = () => {
+                    modal.classList.remove('active');
+                    modalYes.removeEventListener('click', handleYes);
+                    modalNo.removeEventListener('click', handleNo);
+                    resolve(true);
+                };
+                
+                const handleNo = () => {
+                    modal.classList.remove('active');
+                    modalYes.removeEventListener('click', handleYes);
+                    modalNo.removeEventListener('click', handleNo);
+                    resolve(false);
+                };
+                
+                modalYes.addEventListener('click', handleYes);
+                modalNo.addEventListener('click', handleNo);
+            });
+        }
+        
+        // Ollama API functions
+        async function checkModelExists(modelName) {
+            try {
+                addStatus(`Checking for model '${modelName}'...`, 'system');
+                const response = await fetch('http://localhost:11434/api/tags');
+                const data = await response.json();
+                const models = data.models || [];
+                return models.some(m => m.name === modelName || m.name.startsWith(modelName + ':'));
+            } catch (error) {
+                addStatus(`Error checking models: ${error.message}`, 'error');
+                return false;
+            }
+        }
+        
+        async function pullModel(modelName) {
+            try {
+                addStatus(`Pulling model '${modelName}'...`, 'system');
+                addStatus('This may take several minutes depending on model size', 'warning');
+                
+                const response = await fetch('http://localhost:11434/api/pull', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: modelName, stream: true })
+                });
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let lastStatus = '';
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n').filter(line => line.trim());
+                    
+                    for (const line of lines) {
+                        try {
+                            const json = JSON.parse(line);
+                            if (json.status && json.status !== lastStatus) {
+                                lastStatus = json.status;
+                                if (json.completed && json.total) {
+                                    const percent = Math.round((json.completed / json.total) * 100);
+                                    addStatus(`${json.status} - ${percent}%`, 'info');
+                                } else {
+                                    addStatus(json.status, 'info');
+                                }
+                            }
+                        } catch (e) {
+                            // Ignore parse errors
+                        }
+                    }
+                }
+                
+                addStatus(`Model '${modelName}' successfully pulled!`, 'success');
+                return true;
+            } catch (error) {
+                addStatus(`Error pulling model: ${error.message}`, 'error');
+                return false;
+            }
+        }
+        
+        async function initializeModel(modelName) {
+            try {
+                addStatus(`Initializing model '${modelName}'...`, 'system');
+                
+                // Test the model with a simple request
+                const response = await fetch('http://localhost:11434/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: modelName,
+                        prompt: "Respond with 'OK' if you're ready.",
+                        stream: false
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Model initialization failed');
+                }
+                
+                addStatus(`Model '${modelName}' is ready!`, 'success');
+                return true;
+            } catch (error) {
+                addStatus(`Error initializing model: ${error.message}`, 'error');
+                return false;
+            }
+        }
+        
+        async function sendIntroductionPrompt() {
+            const introPrompt = `You are now active and connected to a human through this interface. Please introduce yourself - share your model name, your capabilities, and what kinds of conversations or tasks you're particularly suited for. Keep it concise but informative. Be authentic to your nature as an AI.`;
+            
+            const messageContent = addMessage(currentModel, '', 'assistant');
+            messageContent.textContent = '';
+            
+            try {
+                const response = await fetch('http://localhost:11434/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: currentModel,
+                        prompt: introPrompt,
+                        stream: true
+                    })
+                });
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n').filter(line => line.trim());
+                    
+                    for (const line of lines) {
+                        try {
+                            const json = JSON.parse(line);
+                            if (json.response) {
+                                messageContent.textContent += json.response;
+                                output.scrollTop = output.scrollHeight;
+                            }
+                        } catch (e) {
+                            // Ignore parse errors
+                        }
+                    }
+                }
+            } catch (error) {
+                messageContent.textContent = `[Error: Failed to get introduction - ${error.message}]`;
+            }
+        }
+        
+        async function sendMessage() {
+            const message = input.value.trim();
+            if (!message || isProcessing) return;
+            
+            isProcessing = true;
+            input.value = '';
+            sendBtn.disabled = true;
+            
+            addMessage('You', message, 'user');
+            
+            const responseContent = addMessage(currentModel, '', 'assistant');
+            responseContent.textContent = '';
+            
+            try {
+                const response = await fetch('http://localhost:11434/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: currentModel,
+                        prompt: message,
+                        stream: true
+                    })
+                });
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n').filter(line => line.trim());
+                    
+                    for (const line of lines) {
+                        try {
+                            const json = JSON.parse(line);
+                            if (json.response) {
+                                responseContent.textContent += json.response;
+                                output.scrollTop = output.scrollHeight;
+                            }
+                        } catch (e) {
+                            // Ignore parse errors
+                        }
+                    }
+                }
+            } catch (error) {
+                responseContent.textContent = `[Error: ${error.message}]`;
+            } finally {
+                isProcessing = false;
+                sendBtn.disabled = false;
+                input.focus();
+            }
+        }
+        
+        // Event handlers
+        checkModelBtn.addEventListener('click', async () => {
+            const modelNameInput = modelInput.value.trim();
+            if (!modelNameInput) {
+                addStatus('Please enter a model name', 'warning');
+                return;
+            }
+            
+            checkModelBtn.disabled = true;
+            modelInput.disabled = true;
+            
+            try {
+                // Check if Ollama is running
+                addStatus('Connecting to Ollama...', 'system');
+                const testResponse = await fetch('http://localhost:11434/api/tags').catch(() => null);
+                if (!testResponse) {
+                    addStatus('Cannot connect to Ollama. Please ensure it is running: ollama serve', 'error');
+                    return;
+                }
+                
+                // Check if model exists
+                const modelExists = await checkModelExists(modelNameInput);
+                
+                if (!modelExists) {
+                    addStatus(`Model '${modelNameInput}' not found locally`, 'warning');
+                    const shouldPull = await showModal(`Model '${modelNameInput}' is not installed. Would you like to download it?`);
+                    
+                    if (shouldPull) {
+                        const pullSuccess = await pullModel(modelNameInput);
+                        if (!pullSuccess) {
+                            addStatus('Failed to pull model', 'error');
+                            return;
+                        }
+                    } else {
+                        addStatus('Model installation cancelled', 'info');
+                        return;
+                    }
+                } else {
+                    addStatus(`Model '${modelNameInput}' found locally`, 'success');
+                }
+                
+                // Initialize model
+                const initSuccess = await initializeModel(modelNameInput);
+                if (!initSuccess) {
+                    addStatus('Failed to initialize model', 'error');
+                    return;
+                }
+                
+                // Set up chat interface
+                currentModel = modelNameInput;
+                modelName.textContent = currentModel;
+                chatInterface.classList.add('active');
+                addStatus('Entering chat mode...', 'system');
+                
+                // Add system message to chat
+                addMessage('System', `Connected to ${currentModel}. Requesting introduction...`, 'system');
+                
+                // Send introduction prompt
+                await sendIntroductionPrompt();
+                
+                input.focus();
+                
+            } finally {
+                checkModelBtn.disabled = false;
+                modelInput.disabled = false;
+            }
+        });
+        
+        sendBtn.addEventListener('click', sendMessage);
+        
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+        
+        resetModelBtn.addEventListener('click', () => {
+            if (confirm('Are you sure you want to disconnect and change models?')) {
+                currentModel = null;
+                chatInterface.classList.remove('active');
+                output.innerHTML = '';
+                statusLog.innerHTML = '';
+                modelInput.value = '';
+                modelInput.focus();
+                addStatus('Reset complete. Enter a new model name to begin.', 'system');
+            }
+        });
+        
+        modelInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                checkModelBtn.click();
+            }
+        });
+        
+        // Initial status
+        addStatus('Ollama Oracle Interface initialized', 'system');
+        addStatus('Enter a model name and click "Initialize Model" to begin', 'info');
+    </script>
+</body>
+</html>

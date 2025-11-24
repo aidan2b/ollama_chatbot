@@ -1,6 +1,6 @@
 fastapi
 uvicorn[standard]
-python-dotenv
+dotenv
 websockets
 langchain
 langchain-core

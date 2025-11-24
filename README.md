@@ -45,7 +45,7 @@ The script installs missing packages automatically on first run:
 - langchain, langchain-community
 - langchain-ollama
 - websockets
-- python-dotenv
+- dotenv
 
 ------------------------------------------------------------------------
 
@@ -65,10 +65,7 @@ python3 -m venv venv
 source venv/bin/activate
 ```
 
-### 3. Add a `.env` file (optional)
-
-    OPENAI_API_KEY=...
-    OTHER_ENV=...
+### 3. Add a `.env` file (WIP - Features comings...)
 
 ### 4. Run the server
 

@@ -19,16 +19,24 @@ from pydantic import BaseModel
 import asyncio
 import subprocess
 import json
-from typing import Optional
+from typing import Optional, List
 
 try:
     from langchain_core.callbacks.base import AsyncCallbackHandler
+    from langchain_core.chat_history import BaseChatMessageHistory
+    from langchain_core.messages import BaseMessage
+    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+    from langchain_core.runnables.history import RunnableWithMessageHistory
     from langchain_ollama import ChatOllama
     import uvicorn
 except ImportError:
     print("Installing required packages...")
-    subprocess.check_call(["pip", "install", "fastapi", "uvicorn", "langchain", "langchain-community", "websockets", "--quiet"])
+    subprocess.check_call(["pip", "install", "fastapi", "uvicorn", "langchain", "langchain-core", "langchain-community", "langchain-ollama", "websockets", "--quiet"])
     from langchain_core.callbacks.base import AsyncCallbackHandler
+    from langchain_core.chat_history import BaseChatMessageHistory
+    from langchain_core.messages import BaseMessage
+    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+    from langchain_core.runnables.history import RunnableWithMessageHistory
     from langchain_ollama import ChatOllama
     import uvicorn
 
@@ -43,8 +51,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global model storage
+# Global model storage and chat histories
 models = {}
+chat_histories = {}
+
+class InMemoryChatHistory(BaseChatMessageHistory):
+    """Simple in-memory chat history"""
+    def __init__(self):
+        self.messages: List[BaseMessage] = []
+
+    def add_message(self, message: BaseMessage) -> None:
+        self.messages.append(message)
+
+    def clear(self) -> None:
+        self.messages = []
+
+def get_chat_history(session_id: str) -> BaseChatMessageHistory:
+    """Get or create chat history for a session"""
+    if session_id not in chat_histories:
+        chat_histories[session_id] = InMemoryChatHistory()
+    return chat_histories[session_id]
 
 class WebSocketCallback(AsyncCallbackHandler):
     """Stream tokens to WebSocket"""
@@ -102,34 +128,92 @@ async def pull_model(model_name: str):
 @app.websocket("/ws/{model_name}")
 async def websocket_endpoint(websocket: WebSocket, model_name: str):
     await websocket.accept()
+    
+    # Generate unique session ID for this connection
+    session_id = f"{model_name}_{id(websocket)}"
 
     try:
+        # Create fresh callback for this WebSocket connection
+        callback = WebSocketCallback(websocket)
+        
+        # Create base model if not exists
         if model_name not in models:
-            models[model_name] = ChatOllama(
-                model=model_name,
-                callbacks=[WebSocketCallback(websocket)]
-            )
+            models[model_name] = ChatOllama(model=model_name)
+        
+        # Create prompt template with memory
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are a helpful AI assistant."),
+            MessagesPlaceholder(variable_name="history"),
+            ("human", "{input}")
+        ])
+        
+        # Chain with message history
+        chain = prompt | models[model_name]
+        chain_with_history = RunnableWithMessageHistory(
+            chain,
+            get_chat_history,
+            input_messages_key="input",
+            history_messages_key="history"
+        )
 
-            await websocket.send_json({"type": "system", "content": f"Connected to {model_name}"})
-            intro_prompt = "Introduce yourself briefly - your model name and capabilities."
-            await models[model_name].ainvoke(intro_prompt)
-            await websocket.send_json({"type": "end"})
+        await websocket.send_json({"type": "system", "content": f"Connected to {model_name}"})
+        
+        # Send introduction with callback
+        await websocket.send_json({"type": "start"})
+        intro_prompt = "Introduce yourself briefly - your model name and capabilities."
+        await chain_with_history.ainvoke(
+            {"input": intro_prompt},
+            config={"configurable": {"session_id": session_id}, "callbacks": [callback]}
+        )
+        await websocket.send_json({"type": "end"})
 
         while True:
             data = await websocket.receive_json()
 
             if data["type"] == "message":
-                prompt = data["content"]
+                user_message = data["content"]
                 await websocket.send_json({"type": "start"})
-                await models[model_name].ainvoke(prompt)
+                
+                # Invoke with conversation history and callback
+                await chain_with_history.ainvoke(
+                    {"input": user_message},
+                    config={"configurable": {"session_id": session_id}, "callbacks": [callback]}
+                )
+                
                 await websocket.send_json({"type": "end"})
 
     except Exception as e:
         await websocket.send_json({"type": "error", "content": str(e)})
     finally:
+        # Cleanup session history on disconnect
+        if session_id in chat_histories:
+            del chat_histories[session_id]
         await websocket.close()
+
+def check_ollama_running():
+    """Check if Ollama is running"""
+    try:
+        result = subprocess.run(
+            ["ollama", "list"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
 
 if __name__ == "__main__":
     print("Starting Ollama LangChain Server...")
+    
+    # Check if Ollama is running
+    if not check_ollama_running():
+        print("\n❌ ERROR: Ollama is not running or not installed!")
+        print("Please start Ollama first:")
+        print("  - Run 'ollama serve' in another terminal")
+        print("  - Or install from: https://ollama.com/download")
+        exit(1)
+    
+    print("✓ Ollama detected")
     print("Access at: http://localhost:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000)

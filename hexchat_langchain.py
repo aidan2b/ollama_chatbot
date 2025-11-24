@@ -12,14 +12,6 @@ env_path = Path(__file__).parent / ".env"
 if env_path.exists():
     load_dotenv(dotenv_path=env_path)
 
-# LangSmith tracking settings
-
-API_KEY = os.environ.get("LANGSMITH_API_KEY")
-ENDPOINT = os.environ.get("LANGSMITH_ENDPOINT")
-TRACING = os.environ.get("LANGSMITH_TRACING") == "false"
-PROJECT = os.environ.get("LANGSMITH_PROJECT")
-
-
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -58,7 +50,7 @@ class WebSocketCallback(AsyncCallbackHandler):
     """Stream tokens to WebSocket"""
     def __init__(self, websocket: WebSocket):
         self.websocket = websocket
-        
+
     async def on_llm_new_token(self, token: str, **kwargs) -> None:
         await self.websocket.send_json({"type": "token", "content": token})
 
@@ -75,22 +67,20 @@ async def list_models():
     """List available models"""
     try:
         result = subprocess.run(["ollama", "list"], capture_output=True, text=True)
-        lines = result.stdout.strip().split('\n')[1:]  # Skip header
+        lines = result.stdout.strip().split('\n')[1:]
         models = []
         for line in lines:
             if line.strip():
                 parts = line.split()
-                if parts and ':' in parts[0]:  # Ensure the full model name including tag is kept
-                    models.append(parts[0])  # Keep the complete name including tag
+                if parts and ':' in parts[0]:
+                    models.append(parts[0]) 
         return {"models": models}
     except:
         return {"models": []}
 
 @app.post("/pull/{model_name}")
 async def pull_model(model_name: str):
-    """Pull a model"""
     try:
-        # This would need to be async in production
         subprocess.run(["ollama", "pull", model_name], check=True)
         return {"status": "success", "message": f"Model {model_name} pulled successfully"}
     except subprocess.CalledProcessError as e:
@@ -98,44 +88,43 @@ async def pull_model(model_name: str):
 
 @app.websocket("/ws/{model_name}")
 async def websocket_endpoint(websocket: WebSocket, model_name: str):
-    """WebSocket for streaming chat"""
     await websocket.accept()
-    
+
     try:
-        # Initialize model if not cached
         if model_name not in models:
             models[model_name] = ChatOllama(
                 model=model_name,
                 callbacks=[WebSocketCallback(websocket)]
             )
-            
-            # Send introduction
+
             await websocket.send_json({"type": "system", "content": f"Connected to {model_name}"})
             intro_prompt = "Introduce yourself briefly - your model name and capabilities."
             await models[model_name].ainvoke(intro_prompt)
             await websocket.send_json({"type": "end"})
-        
-        # Chat loop
+
         while True:
             data = await websocket.receive_json()
-            
+
             if data["type"] == "message":
                 prompt = data["content"]
                 await websocket.send_json({"type": "start"})
                 await models[model_name].ainvoke(prompt)
                 await websocket.send_json({"type": "end"})
-                
+
     except Exception as e:
         await websocket.send_json({"type": "error", "content": str(e)})
     finally:
         await websocket.close()
 
-# Embedded HTML interface
 HTML_INTERFACE = '''
 <!DOCTYPE html>
 <html>
 <head>
     <title>Ollama LangChain WebSocket</title>
+
+    <!-- ⭐ Markdown Renderer -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -181,13 +170,20 @@ HTML_INTERFACE = '''
         }
         .message {
             margin: 15px 0;
-            white-space: pre-wrap;
-            line-height: 1.5;
+            line-height: 1.6;
         }
-        .user { color: #87ceeb; }
         .assistant { color: #98fb98; }
+        .user { color: #87ceeb; }
         .system { color: #b19cd9; }
         .error { color: #ff6b6b; }
+
+        pre, code {
+            background: #1a1a1a !important;
+            padding: 6px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+
         #input-area {
             display: flex;
             padding: 15px;
@@ -208,6 +204,7 @@ HTML_INTERFACE = '''
     </style>
 </head>
 <body>
+
     <div id="header">
         <select id="model-select">
             <option value="">Select a model...</option>
@@ -215,127 +212,135 @@ HTML_INTERFACE = '''
         <button id="connect-btn">Connect</button>
         <div id="status">Disconnected</div>
     </div>
-    
+
     <div id="chat"></div>
-    
+
     <div id="input-area">
         <textarea id="input" rows="2" placeholder="Type your message..." disabled></textarea>
         <button id="send-btn" disabled>Send</button>
     </div>
 
-    <script>
-        let ws = null;
-        let currentMessage = null;
-        
-        const chat = document.getElementById('chat');
-        const input = document.getElementById('input');
-        const sendBtn = document.getElementById('send-btn');
-        const connectBtn = document.getElementById('connect-btn');
-        const modelSelect = document.getElementById('model-select');
-        const status = document.getElementById('status');
-        
-        // Load models on startup
-        async function loadModels() {
-            try {
-                const response = await fetch('/models');
-                const data = await response.json();
-                data.models.forEach(model => {
-                    const option = document.createElement('option');
-                    option.value = model;
-                    option.textContent = model;
-                    modelSelect.appendChild(option);
-                });
-            } catch (e) {
-                console.error('Failed to load models:', e);
+<script>
+let ws = null;
+let currentMessage = null;
+
+const chat = document.getElementById('chat');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send-btn');
+const connectBtn = document.getElementById('connect-btn');
+const modelSelect = document.getElementById('model-select');
+const status = document.getElementById('status');
+
+// -------------------------------
+// Markdown Rendering Chat Function
+// -------------------------------
+
+function addMessage(type, content) {
+    const div = document.createElement('div');
+    div.className = `message ${type}`;
+
+    let prefix = "";
+    if (type === "user") prefix = "**You:**\\n\\n";
+    else if (type === "assistant") prefix = `**${modelSelect.value}:**\\n\\n`;
+    else if (type === "system") prefix = "**System:**\\n\\n";
+
+    const md = prefix + content;
+    div.dataset.raw = md;
+    div.innerHTML = marked.parse(md);
+
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+    return div;
+}
+
+// ------------------------------
+
+async function loadModels() {
+    try {
+        const response = await fetch('/models');
+        const data = await response.json();
+        data.models.forEach(model => {
+            const option = document.createElement('option');
+            option.value = model;
+            option.textContent = model;
+            modelSelect.appendChild(option);
+        });
+    } catch (e) {
+        console.error('Failed to load models:', e);
+    }
+}
+
+connectBtn.addEventListener('click', () => {
+    const model = modelSelect.value;
+    if (!model) return;
+
+    if (ws) ws.close();
+
+    ws = new WebSocket(`ws://localhost:8000/ws/${model}`);
+
+    ws.onopen = () => {
+        status.textContent = `Connected: ${model}`;
+        status.style.color = '#98fb98';
+        input.disabled = false;
+        sendBtn.disabled = false;
+        connectBtn.textContent = 'Reconnect';
+        addMessage('system', `Connecting to ${model}...`);
+        currentMessage = addMessage('assistant', '');
+    };
+
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'token') {
+            if (currentMessage) {
+                currentMessage.dataset.raw += data.content;
+                currentMessage.innerHTML = marked.parse(currentMessage.dataset.raw);
+                chat.scrollTop = chat.scrollHeight;
             }
+        } else if (data.type === 'start') {
+            currentMessage = addMessage('assistant', '');
+        } else if (data.type === 'end') {
+            currentMessage = null;
+        } else if (data.type === 'error') {
+            addMessage('error', data.content);
+        } else if (data.type === 'system') {
+            addMessage('system', data.content);
         }
-        
-        function addMessage(type, content) {
-            const div = document.createElement('div');
-            div.className = `message ${type}`;
-            
-            if (type === 'user') {
-                div.textContent = `[You]: ${content}`;
-            } else if (type === 'assistant') {
-                div.textContent = `[${modelSelect.value}]: ${content}`;
-            } else {
-                div.textContent = `[System]: ${content}`;
-            }
-            
-            chat.appendChild(div);
-            chat.scrollTop = chat.scrollHeight;
-            return div;
-        }
-        
-        connectBtn.addEventListener('click', () => {
-            const model = modelSelect.value;
-            if (!model) return;
-            
-            if (ws) ws.close();
-            
-            ws = new WebSocket(`ws://localhost:8000/ws/${model}`);
-            
-            ws.onopen = () => {
-                status.textContent = `Connected: ${model}`;
-                status.style.color = '#98fb98';
-                input.disabled = false;
-                sendBtn.disabled = false;
-                connectBtn.textContent = 'Reconnect';
-                addMessage('system', `Connecting to ${model}...`);
-                currentMessage = addMessage('assistant', '');
-            };
-            
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                
-                if (data.type === 'token') {
-                    if (currentMessage) {
-                        currentMessage.textContent += data.content;
-                        chat.scrollTop = chat.scrollHeight;
-                    }
-                } else if (data.type === 'start') {
-                    currentMessage = addMessage('assistant', '');
-                } else if (data.type === 'end') {
-                    currentMessage = null;
-                } else if (data.type === 'error') {
-                    addMessage('error', data.content);
-                } else if (data.type === 'system') {
-                    addMessage('system', data.content);
-                }
-            };
-            
-            ws.onerror = (error) => {
-                addMessage('error', 'WebSocket error');
-                status.textContent = 'Error';
-                status.style.color = '#ff6b6b';
-            };
-            
-            ws.onclose = () => {
-                status.textContent = 'Disconnected';
-                status.style.color = '#888';
-                input.disabled = true;
-                sendBtn.disabled = true;
-            };
-        });
-        
-        sendBtn.addEventListener('click', () => {
-            const message = input.value.trim();
-            if (!message || !ws) return;
-            
-            addMessage('user', message);
-            ws.send(JSON.stringify({ type: 'message', content: message }));
-            input.value = '';
-        });
-        
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendBtn.click();
-            }
-        });
-        
-        loadModels();
-    </script>
+    };
+
+    ws.onerror = () => {
+        addMessage('error', 'WebSocket error');
+        status.textContent = 'Error';
+        status.style.color = '#ff6b6b';
+    };
+
+    ws.onclose = () => {
+        status.textContent = 'Disconnected';
+        status.style.color = '#888';
+        input.disabled = true;
+        sendBtn.disabled = true;
+    };
+});
+
+sendBtn.addEventListener('click', () => {
+    const message = input.value.trim();
+    if (!message || !ws) return;
+
+    addMessage('user', message);
+    ws.send(JSON.stringify({ type: "message", content: message }));
+    input.value = '';
+});
+
+input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendBtn.click();
+    }
+});
+
+loadModels();
+</script>
+
 </body>
 </html>
 '''

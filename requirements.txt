@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+websockets
+langchain
+langchain-core
+langchain-community
+langchain-ollama
+pydantic<2.0

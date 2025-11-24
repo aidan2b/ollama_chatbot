@@ -1,4 +1,4 @@
-# Ollama LangChain WebSocket Chatbot
+# Ollama Chatbot
 
 A lightweight, real-time chatbot server built using **FastAPI**,
 **LangChain**, and **Ollama**, featuring **WebSocket streaming** for

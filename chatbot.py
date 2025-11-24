@@ -13,7 +13,7 @@ if env_path.exists():
     load_dotenv(dotenv_path=env_path)
 
 from fastapi import FastAPI, WebSocket, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import asyncio
@@ -60,7 +60,11 @@ class ModelInfo(BaseModel):
 @app.get("/")
 async def root():
     """Serve the HTML interface"""
-    return HTMLResponse(content=HTML_INTERFACE)
+    html_path = Path(__file__).parent / "interface.html"
+    if html_path.exists():
+        return HTMLResponse(content=html_path.read_text())
+    else:
+        return HTMLResponse(content="<h1>Error: interface.html not found</h1>", status_code=500)
 
 @app.get("/models")
 async def list_models():
@@ -77,6 +81,15 @@ async def list_models():
         return {"models": models}
     except:
         return {"models": []}
+    
+@app.get("/themes.css")
+async def serve_themes():
+    """Serve the themes CSS file"""
+    css_path = Path(__file__).parent / "themes.css"
+    if css_path.exists():
+        return FileResponse(css_path, media_type="text/css")
+    else:
+        raise HTTPException(status_code=404, detail="themes.css not found")
 
 @app.post("/pull/{model_name}")
 async def pull_model(model_name: str):
@@ -115,235 +128,6 @@ async def websocket_endpoint(websocket: WebSocket, model_name: str):
         await websocket.send_json({"type": "error", "content": str(e)})
     finally:
         await websocket.close()
-
-HTML_INTERFACE = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Ollama LangChain WebSocket</title>
-
-    <!-- ⭐ Markdown Renderer -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Consolas', monospace;
-            background: #0a0a0a;
-            color: #e0e0e0;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        #header {
-            background: #1a1a1a;
-            padding: 15px;
-            border-bottom: 1px solid #333;
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-        #model-select, button {
-            background: #2a2a2a;
-            color: #e0e0e0;
-            border: 1px solid #444;
-            padding: 8px 15px;
-            border-radius: 3px;
-            cursor: pointer;
-        }
-        button:hover:not(:disabled) {
-            background: #3a3a3a;
-        }
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        #status {
-            margin-left: auto;
-            color: #888;
-        }
-        #chat {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px;
-            background: #0f0f0f;
-        }
-        .message {
-            margin: 15px 0;
-            line-height: 1.6;
-        }
-        .assistant { color: #98fb98; }
-        .user { color: #87ceeb; }
-        .system { color: #b19cd9; }
-        .error { color: #ff6b6b; }
-
-        pre, code {
-            background: #1a1a1a !important;
-            padding: 6px;
-            border-radius: 4px;
-            overflow-x: auto;
-        }
-
-        #input-area {
-            display: flex;
-            padding: 15px;
-            background: #1a1a1a;
-            border-top: 1px solid #333;
-            gap: 10px;
-        }
-        #input {
-            flex: 1;
-            background: #2a2a2a;
-            color: #e0e0e0;
-            border: 1px solid #444;
-            padding: 10px;
-            border-radius: 3px;
-            resize: none;
-            font-family: inherit;
-        }
-    </style>
-</head>
-<body>
-
-    <div id="header">
-        <select id="model-select">
-            <option value="">Select a model...</option>
-        </select>
-        <button id="connect-btn">Connect</button>
-        <div id="status">Disconnected</div>
-    </div>
-
-    <div id="chat"></div>
-
-    <div id="input-area">
-        <textarea id="input" rows="2" placeholder="Type your message..." disabled></textarea>
-        <button id="send-btn" disabled>Send</button>
-    </div>
-
-<script>
-let ws = null;
-let currentMessage = null;
-
-const chat = document.getElementById('chat');
-const input = document.getElementById('input');
-const sendBtn = document.getElementById('send-btn');
-const connectBtn = document.getElementById('connect-btn');
-const modelSelect = document.getElementById('model-select');
-const status = document.getElementById('status');
-
-// -------------------------------
-// Markdown Rendering Chat Function
-// -------------------------------
-
-function addMessage(type, content) {
-    const div = document.createElement('div');
-    div.className = `message ${type}`;
-
-    let prefix = "";
-    if (type === "user") prefix = "**You:**\\n\\n";
-    else if (type === "assistant") prefix = `**${modelSelect.value}:**\\n\\n`;
-    else if (type === "system") prefix = "**System:**\\n\\n";
-
-    const md = prefix + content;
-    div.dataset.raw = md;
-    div.innerHTML = marked.parse(md);
-
-    chat.appendChild(div);
-    chat.scrollTop = chat.scrollHeight;
-    return div;
-}
-
-// ------------------------------
-
-async function loadModels() {
-    try {
-        const response = await fetch('/models');
-        const data = await response.json();
-        data.models.forEach(model => {
-            const option = document.createElement('option');
-            option.value = model;
-            option.textContent = model;
-            modelSelect.appendChild(option);
-        });
-    } catch (e) {
-        console.error('Failed to load models:', e);
-    }
-}
-
-connectBtn.addEventListener('click', () => {
-    const model = modelSelect.value;
-    if (!model) return;
-
-    if (ws) ws.close();
-
-    ws = new WebSocket(`ws://localhost:8000/ws/${model}`);
-
-    ws.onopen = () => {
-        status.textContent = `Connected: ${model}`;
-        status.style.color = '#98fb98';
-        input.disabled = false;
-        sendBtn.disabled = false;
-        connectBtn.textContent = 'Reconnect';
-        addMessage('system', `Connecting to ${model}...`);
-        currentMessage = addMessage('assistant', '');
-    };
-
-    ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-
-        if (data.type === 'token') {
-            if (currentMessage) {
-                currentMessage.dataset.raw += data.content;
-                currentMessage.innerHTML = marked.parse(currentMessage.dataset.raw);
-                chat.scrollTop = chat.scrollHeight;
-            }
-        } else if (data.type === 'start') {
-            currentMessage = addMessage('assistant', '');
-        } else if (data.type === 'end') {
-            currentMessage = null;
-        } else if (data.type === 'error') {
-            addMessage('error', data.content);
-        } else if (data.type === 'system') {
-            addMessage('system', data.content);
-        }
-    };
-
-    ws.onerror = () => {
-        addMessage('error', 'WebSocket error');
-        status.textContent = 'Error';
-        status.style.color = '#ff6b6b';
-    };
-
-    ws.onclose = () => {
-        status.textContent = 'Disconnected';
-        status.style.color = '#888';
-        input.disabled = true;
-        sendBtn.disabled = true;
-    };
-});
-
-sendBtn.addEventListener('click', () => {
-    const message = input.value.trim();
-    if (!message || !ws) return;
-
-    addMessage('user', message);
-    ws.send(JSON.stringify({ type: "message", content: message }));
-    input.value = '';
-});
-
-input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendBtn.click();
-    }
-});
-
-loadModels();
-</script>
-
-</body>
-</html>
-'''
 
 if __name__ == "__main__":
     print("Starting Ollama LangChain Server...")

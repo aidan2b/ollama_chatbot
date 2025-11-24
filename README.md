@@ -13,12 +13,12 @@ interface.
 
 ## 🚀 Features
 
--   FastAPI backend with REST + WebSocket support\
--   Real-time streaming of tokens using WebSockets\
--   LangChain `ChatOllama` integration\
--   Automatic Markdown rendering in the frontend\
--   Model auto-loading & on-demand pulling\
--   Custom lightweight HTML/JS Chat UI\
+-   FastAPI backend with REST + WebSocket support
+-   Real-time streaming of tokens using WebSockets
+-   LangChain `ChatOllama` integration
+-   Automatic Markdown rendering in the frontend
+-   Model auto-loading & on-demand pulling
+-   Custom lightweight HTML/JS Chat UI
 -   CORS enabled for easy client integration
 
 ------------------------------------------------------------------------

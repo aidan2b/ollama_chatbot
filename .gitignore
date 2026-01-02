@@ -20,6 +20,10 @@ venv/
 *.db
 *.sqlite
 
+# Persistence files
+system_prompt.json
+*.json
+
 # Logs
 *.log
 

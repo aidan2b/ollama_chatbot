@@ -8,6 +8,7 @@ import gradio as gr
 
 from chatbot.cache import cache
 from chatbot.config import ModelConfig, ui_config
+from chatbot.persistence import persistence
 from chatbot.services.llm import check_ollama_connection, refresh_model_config
 from chatbot.ui.chat import chat, clear_chat, get_model_info
 from chatbot.ui.theme import CUSTOM_CSS, theme
@@ -38,11 +39,6 @@ def refresh_models() -> tuple[gr.Dropdown, str]:
                 if ModelConfig.AVAILABLE_MODELS
                 else None,
             ),
-            get_model_info(
-                ModelConfig.get_default_model()
-                if ModelConfig.AVAILABLE_MODELS
-                else "No model selected"
-            ),
             status_msg,
         )
 
@@ -54,6 +50,24 @@ def refresh_models() -> tuple[gr.Dropdown, str]:
             get_model_info(ModelConfig.get_default_model()),
             error_msg,
         )
+
+
+def show_prompt_info() -> str:
+    """Show information about the current system prompt.
+
+    Returns:
+        Formatted string with prompt information.
+    """
+    info = persistence.get_prompt_info()
+    last_updated = info["last_updated"] or "Never"
+
+    # Format date nicely - handle both old ISO format and new date format
+    if last_updated and last_updated != "Never":
+        if "T" in last_updated:  # Old ISO format
+            last_updated = last_updated.split("T")[0]  # Extract just the date part
+        # New format is already just the date
+
+    return f"📝 Last updated: {last_updated}"
 
 
 def create_app() -> gr.Blocks:
@@ -86,12 +100,6 @@ def create_app() -> gr.Blocks:
                     elem_classes=["model-selector"],
                 )
 
-                # Model info display
-                model_info = gr.Markdown(
-                    get_model_info(ModelConfig.get_default_model()),
-                    elem_classes=["model-info"],
-                )
-
                 # Add refresh button for models
                 with gr.Row():
                     refresh_models_btn = gr.Button(
@@ -113,10 +121,24 @@ def create_app() -> gr.Blocks:
                     elem_classes=["system-prompt-accordion"],
                 ):
                     system_prompt = gr.Textbox(
+                        value=persistence.load_system_prompt(),
                         placeholder="Define the assistant's behavior and personality...",
                         lines=4,
                         show_label=False,
                         max_lines=8,
+                    )
+
+                    with gr.Row():
+                        save_prompt_btn = gr.Button(
+                            "💾 Save System Prompt",
+                            size="sm",
+                            elem_classes=["save-prompt-button"],
+                        )
+
+                    # Last updated display under system prompt
+                    prompt_status = gr.Markdown(
+                        show_prompt_info(),
+                        elem_classes=["prompt-status"],
                     )
 
             # Chat area
@@ -186,23 +208,45 @@ def create_app() -> gr.Blocks:
             outputs=[chatbot, msg],
         )
 
-        # Update model info when model changes
-        model_dropdown.change(
-            get_model_info,
-            inputs=[model_dropdown],
-            outputs=[model_info],
+        # Save system prompt when it changes
+        def save_system_prompt(prompt: str) -> str:
+            persistence.save_system_prompt(prompt)
+            return f"✅ System prompt saved to {persistence.get_prompt_info()['file_path']}"
+
+        system_prompt.change(
+            save_system_prompt,
+            inputs=[system_prompt],
+            outputs=[model_status],
+        )
+
+        # Connect save button
+        save_prompt_btn.click(
+            save_system_prompt,
+            inputs=[system_prompt],
+            outputs=[model_status],
+        )
+
+        # Update prompt status when system prompt changes
+        def update_prompt_status(prompt: str) -> str:
+            return show_prompt_info()
+
+        system_prompt.change(
+            update_prompt_status,
+            inputs=[system_prompt],
+            outputs=[prompt_status],
         )
 
         # Connect refresh models button
         refresh_models_btn.click(
             refresh_models,
-            outputs=[model_dropdown, model_info, model_status],
+            outputs=[model_dropdown, model_status],
         )
 
         # Connect clear cache button
         def clear_cache() -> str:
             cache.clear()
-            return "✅ Cache cleared"
+            stats = cache.get_cache_stats()
+            return f"✅ Cache cleared. LLM cache: {stats['llm_cache']['size']}/{stats['llm_cache']['max_size']}, Response cache: {stats['response_cache']['size']}/{stats['response_cache']['max_size']}"
 
         clear_cache_btn.click(
             clear_cache,
@@ -234,7 +278,7 @@ def main() -> None:
     app = create_app()
     app.launch(
         server_name="0.0.0.0",
-        server_port=7860,
+        server_port=7862,
         share=False,
         show_error=True,
         theme=theme,

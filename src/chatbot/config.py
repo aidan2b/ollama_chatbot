@@ -2,24 +2,14 @@
 
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass, field
+import logging
 from typing import ClassVar
 
+from chatbot.settings import settings
 
-@dataclass(frozen=True)
-class OllamaConfig:
-    """Configuration for Ollama connection."""
-
-    base_url: str = field(
-        default_factory=lambda: os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    )
-    timeout: int = field(
-        default_factory=lambda: int(os.getenv("OLLAMA_TIMEOUT", "120"))
-    )
+logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
 class ModelConfig:
     """Configuration for available models."""
 
@@ -42,17 +32,7 @@ class ModelConfig:
         return model_name in cls.REASONING_MODELS
 
 
-@dataclass(frozen=True)
-class UIConfig:
-    """Configuration for the UI."""
-
-    app_title: str = "Ollama Chat"
-    app_description: str = "A sleek interface for local LLM conversations"
-    chat_height: int = 550
-    max_message_length: int = 10000
-
-
-# Global configuration instances
-ollama_config = OllamaConfig()
+# Use settings from the new settings system
+ollama_config = settings.ollama
+ui_config = settings.app
 model_config = ModelConfig()
-ui_config = UIConfig()

@@ -3,8 +3,37 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Other common ignores
+# Virtual environment
+.venv/
 venv/
+.env/
+
+# Environment files
 .env
-*.log
+.env.local
+
+# IDE
+.idea/
+.vscode/
+
+# Database
+*.db
 *.sqlite
+
+# Logs
+*.log
+
+# Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Test
+.coverage
+*.cover
+
+# Build
+build/
+dist/
+*.egg-info/

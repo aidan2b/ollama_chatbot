@@ -6,6 +6,7 @@ import logging
 from collections.abc import Generator
 
 from chatbot.config import ModelConfig, ui_config
+from chatbot.persistence import conversation_history
 from chatbot.services.llm import (
     LLMConnectionError,
     LLMModelError,
@@ -23,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 # Maximum length for system prompts (characters)
 MAX_SYSTEM_PROMPT_LENGTH = 5000
+
+# Current conversation tracking for auto-save
+_current_conversation_id = None
+_current_conversation_history = []
+_auto_save_enabled = True
 
 
 def sanitize_input(text: str) -> str:
@@ -54,6 +60,75 @@ def sanitize_input(text: str) -> str:
         logger.warning("Input truncated due to excessive length")
 
     return sanitized
+
+
+def start_new_conversation() -> None:
+    """Start a new conversation and initialize tracking."""
+    global _current_conversation_id, _current_conversation_history
+
+    _current_conversation_id = conversation_history.generate_conversation_id()
+    _current_conversation_history = []
+    logger.info("Started new conversation: %s", _current_conversation_id)
+
+
+def add_to_conversation(role: str, content: str) -> None:
+    """Add a message to the current conversation."""
+    global _current_conversation_history
+
+    if _auto_save_enabled:
+        _current_conversation_history.append({"role": role, "content": content})
+        logger.debug("Added to conversation: %s - %s", role, content[:50])
+
+
+def auto_save_conversation(model_name: str, system_prompt: str) -> None:
+    """Automatically save the current conversation."""
+    global _current_conversation_id, _current_conversation_history
+
+    if (
+        not _auto_save_enabled
+        or not _current_conversation_id
+        or not _current_conversation_history
+    ):
+        return
+
+    try:
+        # Extract title from first user message or use default
+        title = "Untitled Conversation"
+        for msg in _current_conversation_history:
+            if msg.get("role") == "user" and msg.get("content"):
+                title = (
+                    msg["content"][:30] + "..."
+                    if len(msg["content"]) > 30
+                    else msg["content"]
+                )
+                break
+
+        metadata = {
+            "title": title,
+            "model": model_name,
+            "system_prompt": system_prompt if system_prompt else "Default",
+            "auto_saved": True,
+        }
+
+        conversation_history.save_conversation(
+            _current_conversation_id, _current_conversation_history, metadata
+        )
+        logger.info("Auto-saved conversation: %s", _current_conversation_id)
+    except Exception as e:
+        logger.error("Error auto-saving conversation: %s", e)
+
+
+def get_current_conversation() -> list[dict[str, str]]:
+    """Get the current conversation history."""
+    global _current_conversation_history
+    return _current_conversation_history.copy()
+
+
+def set_auto_save_enabled(enabled: bool) -> None:
+    """Enable or disable auto-save functionality."""
+    global _auto_save_enabled
+    _auto_save_enabled = enabled
+    logger.info("Auto-save %s", "enabled" if enabled else "disabled")
 
 
 def chat(
@@ -102,6 +177,9 @@ def chat(
 
     new_history = [*history, {"role": "user", "content": message}]
 
+    # Add to conversation history for auto-save
+    add_to_conversation("user", message)
+
     # Show loading indicator immediately
     loading_history = [
         *new_history,
@@ -118,6 +196,13 @@ def chat(
                 response.content,
                 response.thinking if response.thinking else None,
             )
+
+            # Add assistant response to conversation history
+            if response.is_complete:
+                add_to_conversation("assistant", display_content)
+                # Auto-save the conversation
+                auto_save_conversation(model_name, system_prompt)
+
             yield [*new_history, {"role": "assistant", "content": display_content}]
 
     except LLMConnectionError:

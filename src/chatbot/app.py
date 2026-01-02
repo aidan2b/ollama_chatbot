@@ -3,17 +3,168 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import gradio as gr
 
 from chatbot.cache import cache
 from chatbot.config import ModelConfig, ui_config
-from chatbot.persistence import persistence
+from chatbot.persistence import conversation_history, persistence
 from chatbot.services.llm import check_ollama_connection, refresh_model_config
 from chatbot.ui.chat import chat, clear_chat, get_model_info
 from chatbot.ui.theme import CUSTOM_CSS, theme
 
 logger = logging.getLogger(__name__)
+
+
+# Conversation history functions
+def update_conversation_list() -> gr.Dropdown:
+    """Update the conversation list dropdown with available conversations."""
+    conversations = conversation_history.list_conversations()
+    choices = [
+        f"{conv['title']} ({conv['id']}) - {conv['message_count']} messages"
+        for conv in conversations
+    ]
+    return gr.Dropdown(choices=choices, value=choices[0] if choices else None)
+
+
+def save_current_conversation(
+    history: list[dict[str, str]], model_name: str, system_prompt: str
+) -> tuple[str, str]:
+    """Save the current conversation."""
+    if not history:
+        return "❌ No conversation to save", "No conversation selected"
+
+    conversation_id = conversation_history.generate_conversation_id()
+
+    # Extract title from first user message or use default
+    title = "Untitled Conversation"
+    for msg in history:
+        if msg.get("role") == "user" and msg.get("content"):
+            title = (
+                msg["content"][:30] + "..."
+                if len(msg["content"]) > 30
+                else msg["content"]
+            )
+            break
+
+    metadata = {
+        "title": title,
+        "model": model_name,
+        "system_prompt": system_prompt if system_prompt else "Default",
+    }
+
+    conversation_history.save_conversation(conversation_id, history, metadata)
+
+    # Update conversation list
+    update_conversation_list()
+
+    return f"✅ Saved conversation: {title}", f"Saved: {title} ({conversation_id})"
+
+
+def load_selected_conversation(selected: str) -> tuple[list[dict[str, str]], str]:
+    """Load the selected conversation."""
+    if not selected:
+        return [], "❌ No conversation selected"
+
+    # Extract conversation ID from the dropdown text
+    try:
+        conversation_id = selected.split("(")[1].split(")")[0].strip()
+        conversation_data = conversation_history.load_conversation(conversation_id)
+
+        # Note: System prompt update removed to avoid scope issues
+        # The conversation history is still loaded successfully
+
+        return (
+            conversation_data["history"],
+            f"📝 Loaded: {conversation_data.get('metadata', {}).get('title', 'Untitled')}",
+        )
+    except Exception as e:
+        return [], f"❌ Error loading conversation: {str(e)}"
+
+
+def delete_selected_conversation(selected: str) -> str:
+    """Delete the selected conversation."""
+    if not selected:
+        return "❌ No conversation selected"
+
+    try:
+        conversation_id = selected.split("(")[1].split(")")[0].strip()
+        success = conversation_history.delete_conversation(conversation_id)
+
+        if success:
+            # Update conversation list
+            update_conversation_list()
+            return f"🗑️ Deleted conversation"
+        else:
+            return "❌ Conversation not found"
+    except Exception as e:
+        return f"❌ Error deleting conversation: {str(e)}"
+
+
+def search_conversations(query: str) -> gr.Dropdown:
+    """Search conversations by query."""
+    if query.strip():
+        conversations = conversation_history.search_conversations(query.strip())
+        choices = [
+            f"{conv['title']} ({conv['id']}) - {conv['message_count']} messages"
+            for conv in conversations
+        ]
+        return gr.Dropdown(choices=choices, value=choices[0] if choices else None)
+    else:
+        return update_conversation_list()
+
+
+def export_selected_conversation(selected: str) -> str:
+    """Export the selected conversation."""
+    if not selected:
+        return "❌ No conversation selected"
+
+    try:
+        conversation_id = selected.split("(")[1].split(")")[0].strip()
+        export_path = conversation_history.export_conversation(conversation_id)
+        return f"📤 Exported conversation to: {export_path}"
+    except Exception as e:
+        return f"❌ Error exporting conversation: {str(e)}"
+
+
+def export_all_conversations() -> str:
+    """Export all conversations."""
+    try:
+        export_path = conversation_history.export_all_conversations()
+        return f"📤 Exported all conversations to: {export_path}"
+    except Exception as e:
+        return f"❌ Error exporting all conversations: {str(e)}"
+
+
+def show_import_dialog() -> gr.File:
+    """Show the import file dialog."""
+    return gr.File(visible=True)
+
+
+def import_conversation_file(uploaded_file) -> str:
+    """Import a conversation from uploaded file."""
+    if not uploaded_file:
+        return "❌ No file selected"
+
+    try:
+        # Save the uploaded file temporarily
+        import_path = Path("temp_import.json")
+        with open(import_path, "wb") as f:
+            f.write(uploaded_file)
+
+        # Import the conversation
+        conversation_id = conversation_history.import_conversation(import_path)
+
+        # Clean up
+        import_path.unlink()
+
+        # Update conversation list
+        update_conversation_list()
+
+        return f"📥 Imported conversation: {conversation_id}"
+    except Exception as e:
+        return f"❌ Error importing conversation: {str(e)}"
 
 
 def refresh_models() -> tuple[gr.Dropdown, str]:
@@ -70,6 +221,9 @@ def show_prompt_info() -> str:
     return f"📝 Last updated: {last_updated}"
 
 
+# Note: Conversation history functions are defined at the module level above
+
+
 def create_app() -> gr.Blocks:
     """Create and configure the Gradio application.
 
@@ -116,7 +270,7 @@ def create_app() -> gr.Blocks:
 
                 # System prompt
                 with gr.Accordion(
-                    "System Prompt",
+                    "⚙️ System Prompt",
                     open=False,
                     elem_classes=["system-prompt-accordion"],
                 ):
@@ -139,6 +293,82 @@ def create_app() -> gr.Blocks:
                     prompt_status = gr.Markdown(
                         show_prompt_info(),
                         elem_classes=["prompt-status"],
+                    )
+
+                # Conversation history section
+                with gr.Accordion(
+                    "💬 Conversation History",
+                    open=False,
+                    elem_classes=["conversation-history-accordion"],
+                ):
+                    # Search box for conversations
+                    with gr.Row():
+                        conversation_search = gr.Textbox(
+                            placeholder="🔍 Search conversations...",
+                            show_label=False,
+                            elem_classes=["conversation-search"],
+                        )
+                        search_btn = gr.Button(
+                            "🔍 Search",
+                            size="sm",
+                            elem_classes=["search-button"],
+                        )
+
+                    # Conversation list dropdown
+                    conversation_list = gr.Dropdown(
+                        choices=[],
+                        label="Saved Conversations",
+                        elem_classes=["conversation-list"],
+                    )
+
+                    # Conversation management buttons
+                    with gr.Row():
+                        save_conversation_btn = gr.Button(
+                            "💾 Save Current",
+                            size="sm",
+                            elem_classes=["save-conversation-button"],
+                        )
+                        load_conversation_btn = gr.Button(
+                            "📥 Load Selected",
+                            size="sm",
+                            elem_classes=["load-conversation-button"],
+                        )
+                        delete_conversation_btn = gr.Button(
+                            "🗑️ Delete Selected",
+                            size="sm",
+                            elem_classes=["delete-conversation-button"],
+                        )
+
+                    # Export/Import buttons
+                    with gr.Row():
+                        export_conversation_btn = gr.Button(
+                            "📤 Export Selected",
+                            size="sm",
+                            elem_classes=["export-conversation-button"],
+                        )
+                        export_all_btn = gr.Button(
+                            "📤 Export All",
+                            size="sm",
+                            elem_classes=["export-all-button"],
+                        )
+                        import_conversation_btn = gr.Button(
+                            "📥 Import Conversation",
+                            size="sm",
+                            elem_classes=["import-conversation-button"],
+                        )
+
+                    # File upload for import
+                    import_file = gr.File(
+                        label="Select file to import",
+                        file_types=[".json"],
+                        visible=False,
+                        elem_classes=["import-file"],
+                    )
+
+                    # Conversation info display
+                    conversation_info = gr.Markdown(
+                        "No conversation selected",
+                        elem_classes=["conversation-info"],
                     )
 
             # Chat area
@@ -236,6 +466,90 @@ def create_app() -> gr.Blocks:
             outputs=[prompt_status],
         )
 
+        # Connect conversation history buttons
+        save_conversation_btn.click(
+            save_current_conversation,
+            inputs=[chatbot, model_dropdown, system_prompt],
+            outputs=[model_status, conversation_info],
+        )
+
+        load_conversation_btn.click(
+            load_selected_conversation,
+            inputs=[conversation_list],
+            outputs=[chatbot, conversation_info],
+        )
+
+        delete_conversation_btn.click(
+            delete_selected_conversation,
+            inputs=[conversation_list],
+            outputs=[conversation_info],
+        )
+
+        # Update conversation list on app load
+        app.load(
+            update_conversation_list,
+            outputs=[conversation_list],
+        )
+
+        # Connect conversation buttons
+        search_btn.click(
+            search_conversations,
+            inputs=[conversation_search],
+            outputs=[conversation_list],
+        )
+
+        conversation_search.submit(
+            search_conversations,
+            inputs=[conversation_search],
+            outputs=[conversation_list],
+        )
+
+        save_conversation_btn.click(
+            save_current_conversation,
+            inputs=[chatbot, model_dropdown, system_prompt],
+            outputs=[model_status, conversation_info],
+        )
+
+        load_conversation_btn.click(
+            load_selected_conversation,
+            inputs=[conversation_list],
+            outputs=[chatbot, conversation_info],
+        )
+
+        delete_conversation_btn.click(
+            delete_selected_conversation,
+            inputs=[conversation_list],
+            outputs=[conversation_info],
+        )
+
+        export_conversation_btn.click(
+            export_selected_conversation,
+            inputs=[conversation_list],
+            outputs=[conversation_info],
+        )
+
+        export_all_btn.click(
+            export_all_conversations,
+            outputs=[conversation_info],
+        )
+
+        import_conversation_btn.click(
+            show_import_dialog,
+            outputs=[import_file],
+        )
+
+        import_file.change(
+            import_conversation_file,
+            inputs=[import_file],
+            outputs=[conversation_info],
+        )
+
+        # Update conversation list on app load
+        app.load(
+            update_conversation_list,
+            outputs=[conversation_list],
+        )
+
         # Connect refresh models button
         refresh_models_btn.click(
             refresh_models,
@@ -251,6 +565,65 @@ def create_app() -> gr.Blocks:
         clear_cache_btn.click(
             clear_cache,
             outputs=[model_status],
+        )
+
+        # Connect conversation buttons (functions are defined at module level)
+        search_btn.click(
+            search_conversations,
+            inputs=[conversation_search],
+            outputs=[conversation_list],
+        )
+
+        conversation_search.submit(
+            search_conversations,
+            inputs=[conversation_search],
+            outputs=[conversation_list],
+        )
+
+        save_conversation_btn.click(
+            save_current_conversation,
+            inputs=[chatbot, model_dropdown, system_prompt],
+            outputs=[model_status, conversation_info],
+        )
+
+        load_conversation_btn.click(
+            load_selected_conversation,
+            inputs=[conversation_list],
+            outputs=[chatbot, conversation_info],
+        )
+
+        delete_conversation_btn.click(
+            delete_selected_conversation,
+            inputs=[conversation_list],
+            outputs=[conversation_info],
+        )
+
+        export_conversation_btn.click(
+            export_selected_conversation,
+            inputs=[conversation_list],
+            outputs=[conversation_info],
+        )
+
+        export_all_btn.click(
+            export_all_conversations,
+            outputs=[conversation_info],
+        )
+
+        import_conversation_btn.click(
+            show_import_dialog,
+            outputs=[import_file],
+        )
+
+        import_file.change(
+            import_conversation_file,
+            inputs=[import_file],
+            outputs=[conversation_info],
+        )
+
+        # Update conversation list on app load
+        app.load(
+            update_conversation_list,
+            outputs=[conversation_list],
         )
 
     return app
@@ -278,7 +651,7 @@ def main() -> None:
     app = create_app()
     app.launch(
         server_name="0.0.0.0",
-        server_port=7862,
+        server_port=7864,
         share=False,
         show_error=True,
         theme=theme,

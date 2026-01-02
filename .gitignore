@@ -24,6 +24,13 @@ venv/
 system_prompt.json
 *.json
 
+# Conversation history
+conversation_history/
+
+# Exports
+exports/
+temp_import.json
+
 # Logs
 *.log
 

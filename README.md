@@ -35,17 +35,27 @@ The application will start on `http://localhost:7860`
 - 💬 **Conversation history** - Maintain chat context
 
 ### Advanced Features
-- ⚡ **LLM instance caching** - Improved performance with cached model instances
-- 🔄 **Model refresh** - Manual refresh of available models
-- 🧹 **Cache management** - Clear cache when needed
-- 🛡️ **Input sanitization** - Basic security for user inputs
-- 📊 **Model information** - Detailed model info and capabilities
+- ⚡ **LLM instance caching** ✅ - Improved performance with cached model instances
+- 🔄 **Model refresh** ✅ - Manual refresh of available models
+- 🧹 **Cache management** ✅ - Clear cache when needed
+- 🛡️ **Input sanitization** ✅ - Basic security for user inputs
+- 📊 **Model information** ✅ - Detailed model info and capabilities
+- 💾 **System prompt persistence** ✅ - Save and load system prompts between sessions
+- 💬 **Conversation history persistence** ✅ - Save and load chat conversations
 
 ### UI/UX Enhancements
-- 🎨 **Loading indicators** - Visual feedback during model responses
-- 📱 **Responsive design** - Works on different screen sizes
-- 🔄 **Real-time updates** - Model info updates automatically
-- 🎯 **Error handling** - User-friendly error messages
+- 🎨 **Loading indicators** ✅ - Visual feedback during model responses
+- 📱 **Responsive design** ✅ - Works on different screen sizes
+- 🔄 **Real-time updates** ✅ - Model info updates automatically
+- 🎯 **Error handling** ✅ - User-friendly error messages
+- 📋 **Sidebar reorganization** ✅ - Cleaner layout with better organization
+
+### Upcoming Features
+- 💬 **Conversation history persistence** - Save and load chat conversations
+- ⏱️ **Rate limiting** - Prevent abuse and manage resources
+- ⚙️ **Model parameter controls** - Adjust temperature, top_p, etc.
+- 👥 **Multi-user support** - Multiple users and sessions
+- 🔐 **Authentication** - Secure access to the application
 
 ## Configuration
 
@@ -102,10 +112,51 @@ ruff check src/
 
 ## Roadmap
 
-- [ ] Add conversation history persistence
-- [ ] Implement rate limiting
+### ✅ Completed
+- [x] Add comprehensive configuration system with .env support
+- [x] Implement dynamic model loading from Ollama API
+- [x] Add LLM instance caching for better performance
+- [x] Enhance error handling and user feedback
+- [x] Add loading indicators and UI improvements
+- [x] Implement system prompt persistence
+- [x] Reorganize sidebar for better UX
+- [x] Add conversation history persistence
+
+### 🚀 In Progress
+- [ ] Add conversation search and filtering
+- [ ] Implement export/import functionality
 - [ ] Add model parameter controls (temperature, top_p, etc.)
+- [ ] Implement rate limiting
+=======
+### ✅ Completed
+- [x] Add comprehensive configuration system with .env support
+- [x] Implement dynamic model loading from Ollama API
+- [x] Add LLM instance caching for better performance
+- [x] Enhance error handling and user feedback
+- [x] Add loading indicators and UI improvements
+- [x] Implement system prompt persistence
+- [x] Reorganize sidebar for better UX
+- [x] Add conversation history persistence
+
+### 🚀 In Progress
+- [ ] Add conversation search and filtering
+- [ ] Implement export/import functionality
+- [ ] Add model parameter controls (temperature, top_p, etc.)
+- [ ] Implement rate limiting
+=======
+### ✅ Completed
+- [x] Add conversation history persistence
+- [x] Implement rate limiting
+- [x] Add model parameter controls (temperature, top_p, etc.)
+
+### 🚀 In Progress
+- [ ] Add conversation search and filtering
+- [ ] Implement export/import functionality
+
+### 📋 Planned
 - [ ] Support for multiple users/sessions
 - [ ] Add authentication
 - [ ] Implement model downloading/pulling
 - [ ] Add model performance metrics
+- [ ] Add conversation search and filtering
+- [ ] Implement export/import functionality
